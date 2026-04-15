@@ -33,6 +33,15 @@ pub struct AppState {
     /// Cached GPU temperature in Celsius
     gpu_temp: Option<f32>,
 
+    /// Total incoming RX packets across non-loopback interfaces
+    incoming_packets: Option<u64>,
+
+    /// RX packets considered unsafe (errors + drops)
+    unsafe_packets: Option<u64>,
+
+    /// Estimated allowed packets (incoming - unsafe)
+    packets_allowed: Option<u64>,
+
     /// Timestamp of the last automatic refresh
     last_refresh: Instant,
 
@@ -56,6 +65,9 @@ impl AppState {
             last_error: None,
             cpu_temp: None,
             gpu_temp: None,
+            incoming_packets: None,
+            unsafe_packets: None,
+            packets_allowed: None,
             // Force immediate refresh by setting last refresh to 10 seconds ago
             last_refresh: Instant::now() - Duration::from_secs(10),
             // Automatically refresh data every 5 seconds
@@ -144,6 +156,49 @@ impl AppState {
                     self.gpu_temp = Some(temp);
                 }
             }
+        }
+
+        // Parse RX packet counters from /proc/net/dev.
+        self.incoming_packets = None;
+        self.unsafe_packets = None;
+        self.packets_allowed = None;
+
+        if let Ok(text) = std::fs::read_to_string("/proc/net/dev") {
+            let mut incoming_total: u64 = 0;
+            let mut unsafe_total: u64 = 0;
+
+            for line in text.lines().skip(2) {
+                let mut parts = line.split(':');
+                let iface = match parts.next() {
+                    Some(v) => v.trim(),
+                    None => continue,
+                };
+
+                if iface == "lo" {
+                    continue;
+                }
+
+                let data = match parts.next() {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+                let cols: Vec<&str> = data.split_whitespace().collect();
+                if cols.len() < 4 {
+                    continue;
+                }
+
+                let rx_packets = cols[1].parse::<u64>().unwrap_or(0);
+                let rx_errs = cols[2].parse::<u64>().unwrap_or(0);
+                let rx_drop = cols[3].parse::<u64>().unwrap_or(0);
+
+                incoming_total = incoming_total.saturating_add(rx_packets);
+                unsafe_total = unsafe_total.saturating_add(rx_errs.saturating_add(rx_drop));
+            }
+
+            self.incoming_packets = Some(incoming_total);
+            self.unsafe_packets = Some(unsafe_total);
+            self.packets_allowed = Some(incoming_total.saturating_sub(unsafe_total));
         }
     }
 
@@ -590,41 +645,41 @@ impl eframe::App for AppState {
 
                     ui.add_space(10.0);
 
-                    // Row 3: Power and rotation statistics
+                    // Row 3: Packet statistics
                     ui.horizontal(|ui| {
                         ui.add_space(20.0);
 
-                        // Number of power on/off cycles
+                        // Total incoming packets
                         stat_card(
                             ui,
                             card_width,
                             card_height,
-                            "Power cycles",
-                            &di.power_cycles.map(|c| c.to_string()).unwrap_or("--".into()),
+                            "Incoming packets",
+                            &self.incoming_packets.map(|v| v.to_string()).unwrap_or("--".into()),
                             egui::Color32::from_rgb(59, 130, 246),
                         );
 
                         ui.add_space(card_spacing);
 
-                        // Count of unsafe shutdowns (power loss events)
+                        // Count of unsafe packets (RX errors + drops)
                         stat_card(
                             ui,
                             card_width,
                             card_height,
-                            "Unsafe shutdown",
-                            &di.unsafe_shutdowns.map(|us| us.to_string()).unwrap_or("--".into()),
+                            "Unsafe packets",
+                            &self.unsafe_packets.map(|v| v.to_string()).unwrap_or("--".into()),
                             egui::Color32::from_rgb(239, 68, 68),
                         );
 
                         ui.add_space(card_spacing);
 
-                        // Rotation speed for HDDs, or "SSD Detected" for SSDs
+                        // Allowed packets estimated from RX packet counters
                         stat_card(
                             ui,
                             card_width,
                             card_height,
-                            "HDD rotation speed",
-                            &di.rotation_rpm.map(|rpm| format!("{} RPM", rpm)).unwrap_or("SSD Detected".into()),
+                            "Packets allowed",
+                            &self.packets_allowed.map(|v| v.to_string()).unwrap_or("--".into()),
                             egui::Color32::from_rgb(139, 92, 246),
                         );
                     });

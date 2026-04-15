@@ -14,6 +14,8 @@ A modern GUI application for monitoring SSD and HDD health using SMART data. Bui
 ```bash
 sudo apt-get update
 sudo apt-get install smartmontools lm-sensors
+
+sudo chmod +s /usr/sbin/smartctl
 ```
 
 **Fedora/RHEL/CentOS:**
