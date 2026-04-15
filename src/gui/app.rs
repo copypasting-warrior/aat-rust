@@ -3,7 +3,7 @@
 // Import disk scanning functionality
 use crate::gui::{disk_scanner::scan_disks, stat_card};
 // Import disk information models
-use crate::models::DiskInfo;
+use crate::models::{DiskInfo, TelemetrySnapshot};
 // Import egui for UI rendering
 use eframe::egui;
 // Regex for parsing system command output
@@ -15,6 +15,7 @@ use std::sync::Arc;
 // Duration and Instant for time-based operations
 use std::time::{Duration, Instant};
 
+use std::sync::Mutex;
 /// Main application state for the eframe app.
 /// Manages disk information, system temperatures, and UI state.
 pub struct AppState {
@@ -47,6 +48,8 @@ pub struct AppState {
 
     /// How often to automatically refresh drive data
     refresh_interval: Duration,
+
+    telemetry_data: Arc<Mutex<TelemetrySnapshot>>,
 }
 
 impl AppState {
@@ -58,6 +61,15 @@ impl AppState {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Configure light theme for consistent appearance
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+
+        let telemetry_data = Arc::new(Mutex::new(TelemetrySnapshot {
+            drives: Vec::new(),
+            cpu_temp: None,
+            gpu_temp: None,
+            incoming_packets: None,
+            unsafe_packets: None,
+            packets_allowed: None,
+        }));
 
         let mut s = Self {
             drives: Vec::new(),
@@ -72,6 +84,7 @@ impl AppState {
             last_refresh: Instant::now() - Duration::from_secs(10),
             // Automatically refresh data every 5 seconds
             refresh_interval: Duration::from_secs(5),
+            telemetry_data,
         };
 
         // Perform initial data collection
@@ -107,6 +120,7 @@ impl AppState {
                 self.last_error = Some(e);
             }
         }
+        self.sync_telemetry();
     }
 
     /// Updates CPU and GPU temperature readings using external commands.
@@ -200,6 +214,17 @@ impl AppState {
             self.unsafe_packets = Some(unsafe_total);
             self.packets_allowed = Some(incoming_total.saturating_sub(unsafe_total));
         }
+        self.sync_telemetry();
+    }
+
+    fn sync_telemetry(&self) {
+        let mut snapshot = self.telemetry_data.lock().unwrap();
+        snapshot.drives = self.drives.iter().map(|a| (**a).clone()).collect();
+        snapshot.cpu_temp = self.cpu_temp;
+        snapshot.gpu_temp = self.gpu_temp;
+        snapshot.incoming_packets = self.incoming_packets;
+        snapshot.unsafe_packets = self.unsafe_packets;
+        snapshot.packets_allowed = self.packets_allowed;
     }
 
     /// Triggers a manual refresh of disk data and system temperatures.

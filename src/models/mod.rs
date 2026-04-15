@@ -1,8 +1,9 @@
 // Data models for disk information and SMART attributes
-
+use serde::Serialize;
 /// Represents a single SMART attribute from disk diagnostics.
 /// Contains the attribute ID, name, values, and health status.
-#[derive(Clone, Debug)]
+
+#[derive(Clone, Debug, Serialize)]
 pub struct SmartAttribute {
     /// Attribute identifier number
     #[allow(dead_code)]
@@ -29,7 +30,7 @@ pub struct SmartAttribute {
 
 /// Health status classification for SMART attributes.
 /// Determines if an attribute is healthy, approaching failure, or critical.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum AttributeStatus {
     /// Attribute is within normal operating parameters
     Good,
@@ -41,7 +42,7 @@ pub enum AttributeStatus {
 
 /// Information about a single partition on a disk.
 /// Includes mount point, filesystem type, and space usage statistics.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PartitionInfo {
     /// Directory where the partition is mounted (e.g., /home)
     pub mount_point: String,
@@ -59,7 +60,7 @@ pub struct PartitionInfo {
 
 /// Complete information about a disk drive.
 /// Aggregates device details, SMART data, temperature, and partition information.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DiskInfo {
     /// Device path (e.g., /dev/nvme0n1, /dev/sda)
     pub dev: String,
@@ -99,6 +100,16 @@ pub struct DiskInfo {
     pub smart_attributes: Vec<SmartAttribute>,
     /// List of partitions on this drive
     pub partitions: Vec<PartitionInfo>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TelemetrySnapshot {
+    pub drives: Vec<DiskInfo>,
+    pub cpu_temp: Option<f32>,
+    pub gpu_temp: Option<f32>,
+    pub incoming_packets: Option<u64>,
+    pub unsafe_packets: Option<u64>,
+    pub packets_allowed: Option<u64>,
 }
 
 impl DiskInfo {
