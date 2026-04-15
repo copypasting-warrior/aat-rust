@@ -1,5 +1,7 @@
+mod ai_client;
 mod gui;
 mod models;
+
 
 /// Initializes the eframe window with fixed dimensions and launches the GUI.
 fn main() -> eframe::Result<()> {

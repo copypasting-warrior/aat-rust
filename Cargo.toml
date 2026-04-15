@@ -13,6 +13,9 @@ image = "0.25.8"
 nix = "0.30.1"
 regex = "1.12.2"
 sysinfo = "0.37.2"
+# Lightweight synchronous HTTP client for calling the Python AI service
+ureq = "2"
+
 
 # DEB PACKAGE CONFIGURATION
 [package.metadata.deb]

@@ -128,3 +128,18 @@ impl DiskInfo {
         }
     }
 }
+
+/// Result returned by the Python AI service after analysing a drive.
+/// Carries the health classification, confidence, and human-readable
+/// explanation so the UI can display them directly.
+#[derive(Clone, Debug)]
+pub struct AiResult {
+    /// Health label: "healthy", "watchlist", or "risky"
+    pub label: String,
+    /// Confidence in the prediction, 0.0 (low) to 1.0 (high)
+    pub confidence: f32,
+    /// One-sentence explanation of the prediction
+    pub reason: String,
+    /// Recommended next action for the user
+    pub next_step: String,
+}
