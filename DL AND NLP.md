@@ -80,7 +80,9 @@ A suitable public training dataset is the Backblaze Hard Drive Stats dataset: ht
 
 ### What it does
 
-The `/ask` endpoint accepts a user question and the current drive's SMART summary. It returns a short answer (1-3 sentences) in plain English. No internet connection or API key is required — the engine is fully offline.
+The `/ask` endpoint accepts a user question and the current drive's SMART summary. It returns a short answer (1-3 sentences) in plain English. The engine uses the **Google Gemini API** (`gemini-1.5-flash`) to generate intelligent, context-aware responses, restricted exclusively to storage/hardware questions to prevent off-topic prompts.
+
+To use the AI NLP feature, configure your `.env` file first.
 
 ### Supported question intents
 
@@ -102,23 +104,19 @@ The engine detects the intent from the question text using a keyword map and rou
 
 The SMART context (including the AI prediction label and reason from a prior `/predict` call if available) is passed along so answers are specific to the current drive.
 
-### Upgrading to an LLM
+### Environment Variables Configuration
 
-The `DriveNlpEngine.answer()` method in `ai_service/nlp.py` is designed as a single swap point:
+The system requires an API key to run the Gemini generative model.
+1. Copy the example environment file:
+   ```bash
+   cp ai_service/.env.example ai_service/.env
+   ```
+2. Edit `ai_service/.env` and replace `your_gemini_api_key_here` with your actual Google Gemini API key.
 
-```python
-# Current (offline, no API key)
-def answer(self, question: str, smart: dict) -> str:
-    intent = self._detect_intent(question)
-    ...
-
-# Future (LLM-based, swap the body)
-def answer(self, question: str, smart: dict) -> str:
-    context = self._build_context_string(smart)
-    return call_openai(question, context)
-```
-
-The FastAPI route and Rust client are unchanged.
+### Troubleshooting API Issues
+- **Empty or missing key**: If `GEMINI_API_KEY` is not present, the Q&A Answer will immediately return an error message prompting you to set the `.env` variable.
+- **Model not found / Deprecated**: The system defaults to `gemini-2.5-flash`. If Google deprecates this model, you can safely update the model string parameter in `ai_service/nlp.py`.
+- **UI Error Messages**: Because exceptions are handled gracefully in the Python server and returned as HTTP 200 JSON responses, any Gemini API errors (rate limits, service unavailable) will appear directly and safely in the GUI question-answering panel without crashing the application.
 
 ---
 

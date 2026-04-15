@@ -317,9 +317,9 @@ impl eframe::App for AppState {
                     ui.heading(egui::RichText::new("Storage").size(18.0).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let refresh_btn = egui::Button::new(
-                            egui::RichText::new("🔄").size(14.0)
+                            egui::RichText::new("Refresh").size(12.0)
                         )
-                        .frame(false);
+                        .frame(true);
 
                         if ui.add(refresh_btn).on_hover_text("Refresh").clicked() {
                             self.manual_refresh();
@@ -791,7 +791,7 @@ fn render_ai_panel(ui: &mut egui::Ui, ai: Option<&AiResult>) {
                 // Section header
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("🤖  AI Health Insight")
+                        egui::RichText::new("AI Health Insight")
                             .size(15.0)
                             .strong()
                             .color(egui::Color32::from_rgb(99, 102, 241))
@@ -880,8 +880,9 @@ fn render_ai_panel(ui: &mut egui::Ui, ai: Option<&AiResult>) {
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(
-                                        egui::RichText::new("💡 ")
+                                        egui::RichText::new("Note: ")
                                             .size(12.0)
+                                            .strong()
                                     );
                                     ui.label(
                                         egui::RichText::new(&r.next_step)
@@ -927,7 +928,7 @@ fn render_nlp_panel(
 
                 // Section header
                 ui.label(
-                    egui::RichText::new("💬  Ask a Question")
+                    egui::RichText::new("Ask a Question")
                         .size(15.0)
                         .strong()
                         .color(egui::Color32::from_rgb(5, 150, 105))
@@ -958,7 +959,7 @@ fn render_nlp_panel(
                         && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                     let ask_btn = egui::Button::new(
-                        egui::RichText::new(if loading { "…" } else { "Ask" })
+                        egui::RichText::new(if loading { "Thinking..." } else { "Submit" })
                             .size(13.0)
                             .strong()
                     )

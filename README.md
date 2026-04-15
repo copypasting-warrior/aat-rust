@@ -81,6 +81,13 @@ sudo ./target/release/ssd_info_cli
 
 The AI layer runs as a separate Python service. Start it before launching the Rust app to enable health prediction and Q&A.
 
+### Setup API Key
+The NLP feature uses the Gemini API. To use it, simply copy the `.env.example` file to `.env`:
+```bash
+cp ai_service/.env.example ai_service/.env
+```
+Then, edit the `ai_service/.env` file and insert your Google Gemini API key: `GEMINI_API_KEY=your_gemini_api_key_here`.
+
 ### Start the AI service
 
 ```bash
@@ -145,11 +152,13 @@ python -m pytest test_model.py test_nlp.py -v
 
 The application needs root access to read SMART data. Always run with `sudo`.
 
-### AI service not connecting
+### AI service not connecting or returning API Errors
 
 - Confirm the service is running: `curl http://127.0.0.1:5001/health`
 - Check that port 5001 is not blocked by a firewall
 - Restart the service: `bash ai_service/start.sh`
+- **Missing API Key:** If the AI Q&A panel shows **"Error: GEMINI_API_KEY is not set..."**, make sure you copied `.env.example` to `.env` and set a valid Google Gemini API key.
+- **API Rate Limits:** If you receive **"An error occurred..."** referring to rate limits, check your Google AI Studio quota limits.
 
 ## Building from Source
 
