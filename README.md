@@ -62,8 +62,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ssd_info_cli.git
-cd ssd_info_cli
+git clone https://github.com/yourusername/aat-rust.git
+cd aat-rust
 ```
 
 2. Build the application:

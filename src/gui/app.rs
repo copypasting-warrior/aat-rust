@@ -4,7 +4,7 @@ use crate::firewall::{scan_firewall, FirewallSnapshot};
 // Import disk scanning functionality
 use crate::gui::{disk_scanner::scan_disks, stat_card};
 // Import disk information models
-use crate::models::DiskInfo;
+use crate::models::{DiskInfo, TelemetrySnapshot};
 // Import egui for UI rendering
 use eframe::egui;
 // Regex for parsing system command output
@@ -16,6 +16,11 @@ use std::sync::Arc;
 // Duration and Instant for time-based operations
 use std::time::{Duration, Instant};
 
+use std::sync::Mutex;
+use serde_json::json;
+use std::env;
+
+use crate::crypto::Encryptor;
 /// Main application state for the eframe app.
 /// Manages disk information, system temperatures, and UI state.
 pub struct AppState {
@@ -51,6 +56,8 @@ pub struct AppState {
 
     /// How often to automatically refresh drive data
     refresh_interval: Duration,
+
+    telemetry_data: Arc<Mutex<TelemetrySnapshot>>,
 }
 
 impl AppState {
@@ -62,6 +69,15 @@ impl AppState {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Configure light theme for consistent appearance
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+
+        let telemetry_data = Arc::new(Mutex::new(TelemetrySnapshot {
+            drives: Vec::new(),
+            cpu_temp: None,
+            gpu_temp: None,
+            incoming_packets: None,
+            blocked_packets: None,
+            approved_packets: None,
+        }));
 
         let mut s = Self {
             drives: Vec::new(),
@@ -77,6 +93,7 @@ impl AppState {
             last_refresh: Instant::now() - Duration::from_secs(10),
             // Automatically refresh data every 5 seconds
             refresh_interval: Duration::from_secs(5),
+            telemetry_data,
         };
 
         // Perform initial data collection
@@ -112,6 +129,7 @@ impl AppState {
                 self.last_error = Some(e);
             }
         }
+        self.sync_telemetry();
     }
 
     /// Updates CPU and GPU temperature readings using external commands.
@@ -208,6 +226,73 @@ impl AppState {
             self.blocked_packets = Some(blocked_total);
             self.approved_packets = Some(incoming_total.saturating_sub(blocked_total));
         }
+        self.sync_telemetry();
+    }
+
+    fn sync_telemetry(&self) {
+        let mut snapshot = self.telemetry_data.lock().unwrap();
+        snapshot.drives = self.drives.iter().map(|a| (**a).clone()).collect();
+        snapshot.cpu_temp = self.cpu_temp;
+        snapshot.gpu_temp = self.gpu_temp;
+        snapshot.incoming_packets = self.incoming_packets;
+        snapshot.blocked_packets = self.blocked_packets;
+        snapshot.approved_packets = self.approved_packets;
+
+        // Debug: Print telemetry data
+        println!("Telemetry synced:");
+        println!("  Drives: {}", snapshot.drives.len());
+        println!("  CPU Temp: {:?}", snapshot.cpu_temp);
+        println!("  GPU Temp: {:?}", snapshot.gpu_temp);
+        println!("  Incoming packets: {:?}", snapshot.incoming_packets);
+        println!("  Blocked packets: {:?}", snapshot.blocked_packets);
+        println!("  Approved packets: {:?}", snapshot.approved_packets);
+
+        // Send telemetry data to Cloudflare Worker via POST in a background thread
+        let snapshot_clone = (*snapshot).clone();
+        let endpoint = env::var("TELEMETRY_ENDPOINT").unwrap_or_else(|_| "https://ssd-telemetry.ssd-telemetry.workers.dev".to_string());
+        let key_b64 = env::var("TELEMETRY_KEY").ok();
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::new();
+            let payload = json!({"telemetry": snapshot_clone});
+            let plaintext = serde_json::to_string(&payload).unwrap();
+
+            if let Some(k) = &key_b64 {
+                // Encrypt the payload using the existing crypto module
+                let encryptor = Encryptor::from_env();
+                let encrypted_body = encryptor.encrypt(plaintext.as_bytes());
+
+                let request = client.post(&endpoint)
+                    .header("Authorization", format!("Bearer {}", k))
+                    .body(encrypted_body);
+                match request.send() {
+                    Ok(response) => {
+                        if response.status().is_success() {
+                            println!("Telemetry sent successfully");
+                        } else {
+                            eprintln!("Failed to send telemetry: HTTP {}", response.status());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to send telemetry: {}", e);
+                    }
+                }
+            } else {
+                // No key, send plain JSON (for testing, but Worker will fail)
+                let request = client.post(&endpoint).json(&payload);
+                match request.send() {
+                    Ok(response) => {
+                        if response.status().is_success() {
+                            println!("Telemetry sent successfully (no encryption)");
+                        } else {
+                            eprintln!("Failed to send telemetry: HTTP {}", response.status());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to send telemetry: {}", e);
+                    }
+                }
+            }
+        });
     }
 
     /// Triggers a manual refresh of disk data and system temperatures.
@@ -787,6 +872,59 @@ impl eframe::App for AppState {
                                         egui::Color32::from_rgb(245, 158, 11),
                                         egui::RichText::new(format!("Note: {}", note)).size(11.0),
                                     );
+                                }
+                            });
+                        ui.add_space(20.0);
+                    });
+
+                    ui.add_space(15.0);
+
+                    // Telemetry debug section
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+                        egui::Frame::none()
+                            .fill(egui::Color32::WHITE)
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(220)))
+                            .rounding(10.0)
+                            .inner_margin(15.0)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 40.0);
+
+                                ui.label(egui::RichText::new("Telemetry Data").size(14.0).strong());
+                                ui.add_space(8.0);
+
+                                // Display telemetry snapshot
+                                if let Ok(snapshot) = self.telemetry_data.try_lock() {
+                                    egui::Grid::new("telemetry_grid")
+                                        .striped(true)
+                                        .spacing([15.0, 6.0])
+                                        .show(ui, |ui| {
+                                            ui.label(egui::RichText::new("Drives").strong().size(11.0));
+                                            ui.label(egui::RichText::new(format!("{}", snapshot.drives.len())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("CPU Temp").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.cpu_temp.map(|t| format!("{:.1}°C", t)).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("GPU Temp").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.gpu_temp.map(|t| format!("{:.1}°C", t)).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Incoming Packets").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.incoming_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Blocked Packets").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.blocked_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Packets Allowed").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.approved_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+                                        });
+                                } else {
+                                    ui.label("Telemetry data locked");
                                 }
                             });
                         ui.add_space(20.0);
