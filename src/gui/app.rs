@@ -585,7 +585,9 @@ impl eframe::App for AppState {
                             .rounding(12.0)
                             .inner_margin(10.0)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width() - 40.0);
+                                // Perfectly offset (-168px) accounting for ui.horizontal's implicit spacing and margins
+                                // to flush to the -120px absolute right boundary.
+                                ui.set_width(ui.available_width() - 168.0);
 
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
@@ -658,7 +660,7 @@ impl eframe::App for AppState {
                                 .rounding(10.0)
                                 .inner_margin(15.0)
                                 .show(ui, |ui| {
-                                    ui.set_width(ui.available_width() - 40.0);
+                                    ui.set_width(ui.available_width() - 178.0);
 
                                     ui.label(egui::RichText::new("Partitions").size(14.0).strong());
                                     ui.add_space(8.0);
@@ -729,7 +731,7 @@ impl eframe::App for AppState {
                             .rounding(10.0)
                             .inner_margin(15.0)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width() - 40.0);
+                                ui.set_width(ui.available_width() - 178.0);
 
                                 ui.label(egui::RichText::new("Drive Information").size(14.0).strong());
                                 ui.add_space(8.0);
@@ -755,9 +757,14 @@ impl eframe::App for AppState {
                     ui.add_space(12.0);
 
                     // ---- Statistics Cards ----
-                    let card_width = 283.0;
                     let card_spacing = 11.0;
                     let card_height = 75.0;
+                    // To perfectly align the right edge of the 3rd stat cards with the AI/NLP panels (-120px offset),
+                    // we must account for left padding (20), custom spaces (22), and egui's implicit horizontal
+                    // item spacing between the 6 elements (which adds ~40px). 
+                    // This mathematically resolves to exactly -231.0 to perfectly flush the right edge!
+                    let available_for_cards = ui.available_width() - 231.0;
+                    let card_width = (available_for_cards / 3.0).max(100.0);
 
                     // Row 1: Temperature readings
                     ui.horizontal(|ui| {
@@ -901,7 +908,7 @@ impl eframe::App for AppState {
                             .rounding(10.0)
                             .inner_margin(15.0)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width() - 40.0);
+                                ui.set_width(ui.available_width() - 140.0);
 
                                 ui.label(egui::RichText::new("Firewall Details").size(14.0).strong());
                                 ui.add_space(8.0);
@@ -956,7 +963,7 @@ impl eframe::App for AppState {
                             .rounding(10.0)
                             .inner_margin(15.0)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width() - 40.0);
+                                ui.set_width(ui.available_width() - 140.0);
 
                                 ui.label(egui::RichText::new("Telemetry Data").size(14.0).strong());
                                 ui.add_space(8.0);
@@ -1056,6 +1063,8 @@ fn ai_label_style(label: &str) -> (egui::Color32, &'static str) {
 /// Shows a label badge, confidence bar, one-sentence reason, and next step.
 /// If no AI result is available yet, shows a loading/unavailable message.
 fn render_ai_panel(ui: &mut egui::Ui, ai: Option<&AiResult>) {
+    let panel_width = ui.available_width() - 172.0;
+
     ui.horizontal(|ui| {
         ui.add_space(20.0);
         egui::Frame::none()
@@ -1064,113 +1073,119 @@ fn render_ai_panel(ui: &mut egui::Ui, ai: Option<&AiResult>) {
             .rounding(12.0)
             .inner_margin(16.0)
             .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 40.0);
+                ui.vertical(|ui| {
+                    ui.set_width(panel_width.max(100.0));
 
-                // Section header
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("AI Health Insight")
-                            .size(15.0)
-                            .strong()
-                            .color(egui::Color32::from_rgb(99, 102, 241))
-                    );
-                });
-
-                ui.add_space(10.0);
-
-                match ai {
-                    None => {
+                    // Section header
+                    ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(
-                                "AI service is not running.  Start it with:  bash ai_service/start.sh"
-                            )
-                            .size(12.0)
-                            .color(egui::Color32::from_gray(130))
+                            egui::RichText::new("AI Health Insight")
+                                .size(15.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(99, 102, 241))
                         );
-                    }
-                    Some(r) => {
-                        ui.horizontal(|ui| {
-                            // Label badge
-                            let (badge_color, badge_text) = ai_label_style(&r.label);
-                            egui::Frame::none()
-                                .fill(badge_color)
-                                .rounding(6.0)
-                                .inner_margin(egui::vec2(14.0, 6.0))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        egui::RichText::new(badge_text)
-                                            .color(egui::Color32::WHITE)
-                                            .size(13.0)
-                                            .strong()
-                                    );
-                                });
+                    });
 
-                            ui.add_space(12.0);
+                    ui.add_space(10.0);
 
-                            // Confidence bar
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(
-                                        format!("Confidence: {:.0}%", r.confidence * 100.0)
-                                    )
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(100))
-                                );
-                                ui.add_space(4.0);
-                                let bar_width = 160.0;
-                                let bar_height = 8.0;
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(bar_width, bar_height),
-                                    egui::Sense::hover(),
-                                );
-                                // Background track
-                                ui.painter().rect_filled(
-                                    rect,
-                                    4.0,
-                                    egui::Color32::from_gray(220),
-                                );
-                                // Filled portion
-                                let filled = egui::Rect::from_min_size(
-                                    rect.min,
-                                    egui::vec2(bar_width * r.confidence, bar_height),
-                                );
-                                let (bar_col, _) = ai_label_style(&r.label);
-                                ui.painter().rect_filled(filled, 4.0, bar_col);
-                            });
-                        });
-
-                        ui.add_space(10.0);
-
-                        // Reason
-                        ui.label(
-                            egui::RichText::new(&r.reason)
+                    match ai {
+                        None => {
+                            ui.label(
+                                egui::RichText::new(
+                                    "AI service is not running.  Start it with:  bash ai_service/start.sh"
+                                )
                                 .size(12.0)
-                                .color(egui::Color32::from_gray(50))
-                        );
+                                .color(egui::Color32::from_gray(130))
+                            );
+                        }
+                        Some(r) => {
+                            ui.horizontal(|ui| {
+                                // Label badge
+                                let (badge_color, badge_text) = ai_label_style(&r.label);
+                                egui::Frame::none()
+                                    .fill(badge_color)
+                                    .rounding(6.0)
+                                    .inner_margin(egui::vec2(14.0, 6.0))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new(badge_text)
+                                                .color(egui::Color32::WHITE)
+                                                .size(13.0)
+                                                .strong()
+                                        );
+                                    });
 
-                        ui.add_space(6.0);
+                                ui.add_space(12.0);
 
-                        // Next step (highlighted box)
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(238, 242, 255))
-                            .rounding(6.0)
-                            .inner_margin(egui::vec2(10.0, 6.0))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
+                                // Confidence bar
+                                ui.vertical(|ui| {
                                     ui.label(
-                                        egui::RichText::new("Note: ")
-                                            .size(12.0)
-                                            .strong()
+                                        egui::RichText::new(
+                                            format!("Confidence: {:.0}%", r.confidence * 100.0)
+                                        )
+                                        .size(11.0)
+                                        .color(egui::Color32::from_gray(100))
                                     );
-                                    ui.label(
-                                        egui::RichText::new(&r.next_step)
-                                            .size(12.0)
-                                            .color(egui::Color32::from_rgb(67, 56, 202))
+                                    ui.add_space(4.0);
+                                    let bar_width = 160.0;
+                                    let bar_height = 8.0;
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(bar_width, bar_height),
+                                        egui::Sense::hover(),
                                     );
+                                    // Background track
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        4.0,
+                                        egui::Color32::from_gray(220),
+                                    );
+                                    // Filled portion
+                                    let filled = egui::Rect::from_min_size(
+                                        rect.min,
+                                        egui::vec2(bar_width * r.confidence, bar_height),
+                                    );
+                                    let (bar_col, _) = ai_label_style(&r.label);
+                                    ui.painter().rect_filled(filled, 4.0, bar_col);
                                 });
                             });
+
+                            ui.add_space(10.0);
+
+                            // Reason
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&r.reason)
+                                        .size(12.0)
+                                        .color(egui::Color32::from_gray(50))
+                                ).wrap()
+                            );
+
+                            ui.add_space(6.0);
+
+                            // Next step (highlighted box)
+                            egui::Frame::none()
+                                .fill(egui::Color32::from_rgb(238, 242, 255))
+                                .rounding(6.0)
+                                .inner_margin(egui::vec2(10.0, 6.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("Note: ")
+                                                .size(12.0)
+                                                .strong()
+                                        );
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(&r.next_step)
+                                                    .size(12.0)
+                                                    .color(egui::Color32::from_rgb(67, 56, 202))
+                                            ).wrap()
+                                        );
+                                    });
+                                });
+                        }
                     }
-                }
+                });
             });
         ui.add_space(20.0);
     });
@@ -1194,6 +1209,8 @@ fn render_nlp_panel(
     get_drive_fn: impl Fn() -> Arc<DiskInfo>,
     mut submit_fn: impl FnMut(Arc<DiskInfo>),
 ) {
+    let panel_width = ui.available_width() - 172.0;
+
     ui.horizontal(|ui| {
         ui.add_space(20.0);
         egui::Frame::none()
@@ -1202,79 +1219,84 @@ fn render_nlp_panel(
             .rounding(12.0)
             .inner_margin(16.0)
             .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 40.0);
+                ui.vertical(|ui| {
+                    ui.set_width(panel_width.max(100.0));
 
-                // Section header
-                ui.label(
-                    egui::RichText::new("Ask a Question")
-                        .size(15.0)
-                        .strong()
-                        .color(egui::Color32::from_rgb(5, 150, 105))
-                );
-
-                ui.add_space(8.0);
-
-                // Hint text
-                ui.label(
-                    egui::RichText::new("e.g.  \"Is this drive safe?\"  •  \"Why is it risky?\"  •  \"What does unsafe shutdown mean?\"")
-                        .size(11.0)
-                        .color(egui::Color32::from_gray(140))
-                );
-
-                ui.add_space(8.0);
-
-                // Input row: text box + Ask button
-                ui.horizontal(|ui| {
-                    let text_edit = egui::TextEdit::singleline(input)
-                        .hint_text("Type your question here…")
-                        .desired_width(ui.available_width() - 80.0);
-                    let te_response = ui.add(text_edit);
+                    // Section header
+                    ui.label(
+                        egui::RichText::new("Ask a Question")
+                            .size(15.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(5, 150, 105))
+                    );
 
                     ui.add_space(8.0);
 
-                    // Submit on Enter key or button click
-                    let enter_pressed = te_response.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    // Hint text
+                    ui.label(
+                        egui::RichText::new("e.g.  \"Is this drive safe?\"  •  \"Why is it risky?\"  •  \"What does unsafe shutdown mean?\"")
+                            .size(11.0)
+                            .color(egui::Color32::from_gray(140))
+                    );
 
-                    let ask_btn = egui::Button::new(
-                        egui::RichText::new(if loading { "Thinking..." } else { "Submit" })
-                            .size(13.0)
-                            .strong()
-                    )
-                    .min_size(egui::vec2(60.0, 30.0))
-                    .fill(egui::Color32::from_rgb(16, 185, 129));
+                    ui.add_space(8.0);
 
-                    let clicked = ui.add_enabled(!loading, ask_btn).clicked();
+                    // Input row: text box + Ask button
+                    let text_width = ui.available_width() - 80.0;
+                    ui.horizontal(|ui| {
+                        let text_edit = egui::TextEdit::singleline(input)
+                            .hint_text("Type your question here…")
+                            .desired_width(text_width.max(100.0));
+                        let te_response = ui.add(text_edit);
 
-                    if (clicked || enter_pressed) && !loading && !input.trim().is_empty() {
-                        let drive = get_drive_fn();
-                        submit_fn(drive);
+                        ui.add_space(8.0);
+
+                        // Submit on Enter key or button click
+                        let enter_pressed = te_response.lost_focus()
+                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                        let ask_btn = egui::Button::new(
+                            egui::RichText::new(if loading { "Thinking..." } else { "Submit" })
+                                .size(13.0)
+                                .strong()
+                        )
+                        .min_size(egui::vec2(60.0, 30.0))
+                        .fill(egui::Color32::from_rgb(16, 185, 129));
+
+                        let clicked = ui.add_enabled(!loading, ask_btn).clicked();
+
+                        if (clicked || enter_pressed) && !loading && !input.trim().is_empty() {
+                            let drive = get_drive_fn();
+                            submit_fn(drive);
+                        }
+                    });
+
+                    // Show answer
+                    if let Some(ans) = response {
+                        ui.add_space(10.0);
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(240, 253, 250))
+                            .rounding(8.0)
+                            .inner_margin(egui::vec2(12.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(ans)
+                                            .size(12.5)
+                                            .color(egui::Color32::from_rgb(6, 78, 59))
+                                    ).wrap()
+                                );
+                            });
+                    } else if loading {
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new("Thinking…")
+                                .size(12.0)
+                                .color(egui::Color32::from_gray(130))
+                        );
                     }
                 });
-
-                // Show answer
-                if let Some(ans) = response {
-                    ui.add_space(10.0);
-                    egui::Frame::none()
-                        .fill(egui::Color32::from_rgb(240, 253, 250))
-                        .rounding(8.0)
-                        .inner_margin(egui::vec2(12.0, 8.0))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                egui::RichText::new(ans)
-                                    .size(12.5)
-                                    .color(egui::Color32::from_rgb(6, 78, 59))
-                            );
-                        });
-                } else if loading {
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new("Thinking…")
-                            .size(12.0)
-                            .color(egui::Color32::from_gray(130))
-                    );
-                }
             });
         ui.add_space(20.0);
     });

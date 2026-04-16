@@ -48,11 +48,12 @@ fn load_env_file() {
 fn main() -> eframe::Result<()> {
     load_env_file();
 
-    // Configure window options with fixed size of 1200x675 pixels
+    // Configure window options with dynamic size layout
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 675.0])
-            .with_resizable(false),
+            .with_inner_size([1920.0, 1080.0])
+            .with_min_inner_size([800.0, 600.0])
+            .with_resizable(true),
         ..Default::default()
     };
 
