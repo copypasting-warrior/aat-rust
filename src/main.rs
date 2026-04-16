@@ -1,4 +1,5 @@
 mod gui;
+mod firewall;
 mod models;
 
 /// Initializes the eframe window with fixed dimensions and launches the GUI.
