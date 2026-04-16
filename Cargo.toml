@@ -13,12 +13,15 @@ image = "0.25.8"
 nix = "0.30.1"
 regex = "1.12.2"
 sysinfo = "0.37.2"
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 aes-gcm = "0.10"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 rand = "0.8"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+base64 = "0.21"
+
+reqwest = { version = "0.12", features = ["blocking","json", "rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time"] }
 
 # DEB PACKAGE CONFIGURATION
