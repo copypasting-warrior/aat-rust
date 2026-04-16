@@ -1010,6 +1010,7 @@ impl eframe::App for AppState {
                     // ================================================================ //
                     // NLP Q&A PANEL
                     // ================================================================ //
+                    let mut submit_drive: Option<Arc<DiskInfo>> = None;
                     render_nlp_panel(
                         ui,
                         &mut self.nlp_input,
@@ -1020,9 +1021,12 @@ impl eframe::App for AppState {
                             di.clone()
                         },
                         |drive| {
-                            self.submit_nlp_question(drive);
+                            submit_drive = Some(drive);
                         },
                     );
+                    if let Some(drive) = submit_drive {
+                        self.submit_nlp_question(drive);
+                    }
 
                     ui.add_space(20.0);
                 });
