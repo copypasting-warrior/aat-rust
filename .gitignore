@@ -36,7 +36,6 @@ Cargo.lock
 .egui/
 
 # System config or secret files
-.env
 Cargo.lock
 
 
@@ -45,3 +44,7 @@ ai_service/__pycache__/
 ai_service/.pytest_cache/
 __pycache__/
 .pytest_cache/
+
+env
+.env
+

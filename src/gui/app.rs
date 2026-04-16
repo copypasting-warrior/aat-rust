@@ -2,10 +2,12 @@
 
 // Import AI client for calling Python AI service
 use crate::ai_client;
+use crate::firewall::{scan_firewall, FirewallSnapshot};
 // Import disk scanning functionality
 use crate::gui::{disk_scanner::scan_disks, stat_card};
 // Import disk information models
-use crate::models::{AiResult, DiskInfo};
+use crate::models::{AiResult, DiskInfo, TelemetrySnapshot};
+
 // Import egui for UI rendering
 use eframe::egui;
 // Regex for parsing system command output
@@ -18,6 +20,29 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 // Collections for storing AI results keyed by device path
 use std::collections::HashMap;
+
+use serde_json::json;
+use std::env;
+
+use crate::crypto::Encryptor;
+
+struct TelemetryConfig {
+    endpoint: String,
+    key_b64: String,
+}
+
+fn telemetry_config_from_env() -> Option<TelemetryConfig> {
+    let endpoint = env::var("TELEMETRY_ENDPOINT").ok()?.trim().to_string();
+    if endpoint.is_empty()
+        || endpoint.contains("YOUR-SUBDOMAIN")
+    {
+        eprintln!("Telemetry disabled: set TELEMETRY_ENDPOINT to your deployed worker URL");
+        return None;
+    }
+
+    let key_b64 = env::var("TELEMETRY_KEY").ok()?;
+    Some(TelemetryConfig { endpoint, key_b64 })
+}
 
 /// Main application state for the eframe app.
 /// Manages disk information, system temperatures, and UI state.
@@ -37,14 +62,17 @@ pub struct AppState {
     /// Cached GPU temperature in Celsius
     gpu_temp: Option<f32>,
 
+    /// Snapshot of firewall state discovered from ufw/nftables/iptables
+    firewall: FirewallSnapshot,
+
     /// Total incoming RX packets across non-loopback interfaces
     incoming_packets: Option<u64>,
 
-    /// RX packets considered unsafe (errors + drops)
-    unsafe_packets: Option<u64>,
+    /// RX packets treated as blocked/failed (errors + drops)
+    blocked_packets: Option<u64>,
 
-    /// Estimated allowed packets (incoming - unsafe)
-    packets_allowed: Option<u64>,
+    /// Packets approved/accepted at interface level
+    approved_packets: Option<u64>,
 
     /// Timestamp of the last automatic refresh
     last_refresh: Instant,
@@ -71,6 +99,10 @@ pub struct AppState {
 
     /// True while the background NLP call is in flight
     nlp_loading: bool,
+
+    telemetry_data: Arc<Mutex<TelemetrySnapshot>>,
+    telemetry_config: Option<TelemetryConfig>,
+
 }
 
 impl AppState {
@@ -80,15 +112,25 @@ impl AppState {
         // Configure light theme for consistent appearance
         cc.egui_ctx.set_visuals(egui::Visuals::light());
 
+        let telemetry_data = Arc::new(Mutex::new(TelemetrySnapshot {
+            drives: Vec::new(),
+            cpu_temp: None,
+            gpu_temp: None,
+            incoming_packets: None,
+            blocked_packets: None,
+            approved_packets: None,
+        }));
+
         let mut s = Self {
             drives: Vec::new(),
             selected: 0,
             last_error: None,
             cpu_temp: None,
             gpu_temp: None,
+            firewall: FirewallSnapshot::unavailable("Firewall not scanned yet"),
             incoming_packets: None,
-            unsafe_packets: None,
-            packets_allowed: None,
+            blocked_packets: None,
+            approved_packets: None,
             // Force immediate refresh by setting last refresh to 10 seconds ago
             last_refresh: Instant::now() - Duration::from_secs(10),
             // Automatically refresh data every 5 seconds
@@ -99,6 +141,9 @@ impl AppState {
             nlp_input: String::new(),
             nlp_response: Arc::new(Mutex::new(None)),
             nlp_loading: false,
+            telemetry_data,
+            telemetry_config: telemetry_config_from_env(),
+
         };
 
         s.refresh();
@@ -128,6 +173,7 @@ impl AppState {
                 self.last_error = Some(e);
             }
         }
+        self.sync_telemetry();
     }
 
     /// Spawn a background thread that calls /predict for every drive.
@@ -201,14 +247,17 @@ impl AppState {
             }
         }
 
+        // Refresh firewall status from local backends (ufw, nftables, iptables).
+        self.firewall = scan_firewall();
+
         // Parse RX packet counters from /proc/net/dev.
         self.incoming_packets = None;
-        self.unsafe_packets = None;
-        self.packets_allowed = None;
+        self.blocked_packets = None;
+        self.approved_packets = None;
 
         if let Ok(text) = std::fs::read_to_string("/proc/net/dev") {
             let mut incoming_total: u64 = 0;
-            let mut unsafe_total: u64 = 0;
+            let mut blocked_total: u64 = 0;
 
             for line in text.lines().skip(2) {
                 let mut parts = line.split(':');
@@ -236,13 +285,66 @@ impl AppState {
                 let rx_drop = cols[3].parse::<u64>().unwrap_or(0);
 
                 incoming_total = incoming_total.saturating_add(rx_packets);
-                unsafe_total = unsafe_total.saturating_add(rx_errs.saturating_add(rx_drop));
+                blocked_total = blocked_total.saturating_add(rx_errs.saturating_add(rx_drop));
             }
 
             self.incoming_packets = Some(incoming_total);
-            self.unsafe_packets = Some(unsafe_total);
-            self.packets_allowed = Some(incoming_total.saturating_sub(unsafe_total));
+            self.blocked_packets = Some(blocked_total);
+            self.approved_packets = Some(incoming_total.saturating_sub(blocked_total));
         }
+        self.sync_telemetry();
+    }
+
+    fn sync_telemetry(&self) {
+        let mut snapshot = self.telemetry_data.lock().unwrap();
+        snapshot.drives = self.drives.iter().map(|a| (**a).clone()).collect();
+        snapshot.cpu_temp = self.cpu_temp;
+        snapshot.gpu_temp = self.gpu_temp;
+        snapshot.incoming_packets = self.incoming_packets;
+        snapshot.blocked_packets = self.blocked_packets;
+        snapshot.approved_packets = self.approved_packets;
+
+        let Some(telemetry_config) = self.telemetry_config.as_ref() else {
+            return;
+        };
+
+        // Debug: Print telemetry data
+        println!("Telemetry synced:");
+        println!("  Drives: {}", snapshot.drives.len());
+        println!("  CPU Temp: {:?}", snapshot.cpu_temp);
+        println!("  GPU Temp: {:?}", snapshot.gpu_temp);
+        println!("  Incoming packets: {:?}", snapshot.incoming_packets);
+        println!("  Blocked packets: {:?}", snapshot.blocked_packets);
+        println!("  Approved packets: {:?}", snapshot.approved_packets);
+
+        // Send telemetry data to Cloudflare Worker via POST in a background thread.
+        let snapshot_clone = (*snapshot).clone();
+        let endpoint = telemetry_config.endpoint.clone();
+        let key_b64 = telemetry_config.key_b64.clone();
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::new();
+            let payload = json!({"telemetry": snapshot_clone});
+            let plaintext = serde_json::to_string(&payload).unwrap();
+
+            let encryptor = Encryptor::from_env();
+            let encrypted_body = encryptor.encrypt(plaintext.as_bytes());
+
+            let request = client.post(&endpoint)
+                .header("Authorization", format!("Bearer {}", key_b64))
+                .body(encrypted_body);
+            match request.send() {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        println!("Telemetry sent successfully");
+                    } else {
+                        eprintln!("Failed to send telemetry: HTTP {}", response.status());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to send telemetry: {}", e);
+                }
+            }
+        });
     }
 
     /// Triggers a manual refresh of disk data and system temperatures.
@@ -703,25 +805,197 @@ impl eframe::App for AppState {
 
                     ui.add_space(10.0);
 
-                    // Row 3: Packet statistics
+                    // Row 3: Firewall summary
                     ui.horizontal(|ui| {
                         ui.add_space(20.0);
 
-                        stat_card(ui, card_width, card_height, "Incoming packets",
+                        let fw_status = if self.firewall.enabled { "Active" } else { "Inactive" };
+                        let fw_status_color = if self.firewall.enabled {
+                            egui::Color32::from_rgb(34, 197, 94)
+                        } else {
+                            egui::Color32::from_rgb(239, 68, 68)
+                        };
+
+                        // Current firewall activation status
+                        stat_card(
+                            ui,
+                            card_width,
+                            card_height,
+                            &format!("Firewall ({})", self.firewall.backend),
+                            fw_status,
+                            fw_status_color,
+                        );
+
+                        ui.add_space(card_spacing);
+
+                        // Default input policy (when detectable)
+                        stat_card(
+                            ui,
+                            card_width,
+                            card_height,
+                            "Default input policy",
+                            &self.firewall.default_input_policy,
+                            egui::Color32::from_rgb(59, 130, 246),
+                        );
+
+                        ui.add_space(card_spacing);
+
+                        // Total active rules parsed from backend output
+                        stat_card(
+                            ui,
+                            card_width,
+                            card_height,
+                            "Rules loaded",
+                            &self.firewall.rules_count.to_string(),
+                            egui::Color32::from_rgb(139, 92, 246),
+                        );
+                    });
+
+                    ui.add_space(10.0);
+
+                    // Row 4: Packet counters requested by user.
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+
+                        stat_card(
+                            ui,
+                            card_width,
+                            card_height,
+                            "Incoming packets",
+
                             &self.incoming_packets.map(|v| v.to_string()).unwrap_or("--".into()),
                             egui::Color32::from_rgb(59, 130, 246));
 
                         ui.add_space(card_spacing);
 
-                        stat_card(ui, card_width, card_height, "Unsafe packets",
-                            &self.unsafe_packets.map(|v| v.to_string()).unwrap_or("--".into()),
-                            egui::Color32::from_rgb(239, 68, 68));
+                        stat_card(
+                            ui,
+                            card_width,
+                            card_height,
+                            "Blocked packets",
+                            &self.blocked_packets.map(|v| v.to_string()).unwrap_or("--".into()),
+                            egui::Color32::from_rgb(239, 68, 68),
+                        );
 
                         ui.add_space(card_spacing);
 
-                        stat_card(ui, card_width, card_height, "Packets allowed",
-                            &self.packets_allowed.map(|v| v.to_string()).unwrap_or("--".into()),
-                            egui::Color32::from_rgb(139, 92, 246));
+                        stat_card(
+                            ui,
+                            card_width,
+                            card_height,
+                            "Approved packets",
+                            &self.approved_packets.map(|v| v.to_string()).unwrap_or("--".into()),
+                            egui::Color32::from_rgb(34, 197, 94),
+                        );
+
+                    });
+
+                    ui.add_space(10.0);
+
+                    // Detailed firewall block to expose our custom module output.
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+                        egui::Frame::none()
+                            .fill(egui::Color32::WHITE)
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(220)))
+                            .rounding(10.0)
+                            .inner_margin(15.0)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 40.0);
+
+                                ui.label(egui::RichText::new("Firewall Details").size(14.0).strong());
+                                ui.add_space(8.0);
+
+                                egui::Grid::new("firewall_grid")
+                                    .striped(true)
+                                    .spacing([15.0, 6.0])
+                                    .show(ui, |ui| {
+                                        ui.label(egui::RichText::new("Backend").strong().size(11.0));
+                                        ui.label(egui::RichText::new("Status").strong().size(11.0));
+                                        ui.label(egui::RichText::new("Default output policy").strong().size(11.0));
+                                        ui.end_row();
+
+                                        ui.label(egui::RichText::new(&self.firewall.backend).size(11.0));
+                                        ui.label(egui::RichText::new(&self.firewall.status_line).size(11.0));
+                                        ui.label(egui::RichText::new(&self.firewall.default_output_policy).size(11.0));
+                                        ui.end_row();
+                                    });
+
+                                ui.add_space(6.0);
+                                let open_ports_text = if self.firewall.open_ports.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    self.firewall.open_ports.join(", ")
+                                };
+
+                                ui.label(
+                                    egui::RichText::new(format!("Open allowed ports: {}", open_ports_text))
+                                        .size(11.0)
+                                        .color(egui::Color32::from_gray(90)),
+                                );
+
+                                if let Some(note) = &self.firewall.note {
+                                    ui.add_space(4.0);
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(245, 158, 11),
+                                        egui::RichText::new(format!("Note: {}", note)).size(11.0),
+                                    );
+                                }
+                            });
+                        ui.add_space(20.0);
+                    });
+
+                    ui.add_space(15.0);
+
+                    // Telemetry debug section
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+                        egui::Frame::none()
+                            .fill(egui::Color32::WHITE)
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(220)))
+                            .rounding(10.0)
+                            .inner_margin(15.0)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 40.0);
+
+                                ui.label(egui::RichText::new("Telemetry Data").size(14.0).strong());
+                                ui.add_space(8.0);
+
+                                // Display telemetry snapshot
+                                if let Ok(snapshot) = self.telemetry_data.try_lock() {
+                                    egui::Grid::new("telemetry_grid")
+                                        .striped(true)
+                                        .spacing([15.0, 6.0])
+                                        .show(ui, |ui| {
+                                            ui.label(egui::RichText::new("Drives").strong().size(11.0));
+                                            ui.label(egui::RichText::new(format!("{}", snapshot.drives.len())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("CPU Temp").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.cpu_temp.map(|t| format!("{:.1}°C", t)).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("GPU Temp").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.gpu_temp.map(|t| format!("{:.1}°C", t)).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Incoming Packets").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.incoming_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Blocked Packets").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.blocked_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Packets Allowed").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.approved_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.end_row();
+                                        });
+                                } else {
+                                    ui.label("Telemetry data locked");
+                                }
+                            });
+                        ui.add_space(20.0);
                     });
 
                     ui.add_space(15.0);
