@@ -21,6 +21,25 @@ use serde_json::json;
 use std::env;
 
 use crate::crypto::Encryptor;
+
+struct TelemetryConfig {
+    endpoint: String,
+    key_b64: String,
+}
+
+fn telemetry_config_from_env() -> Option<TelemetryConfig> {
+    let endpoint = env::var("TELEMETRY_ENDPOINT").ok()?.trim().to_string();
+    if endpoint.is_empty()
+        || endpoint.contains("YOUR-SUBDOMAIN")
+    {
+        eprintln!("Telemetry disabled: set TELEMETRY_ENDPOINT to your deployed worker URL");
+        return None;
+    }
+
+    let key_b64 = env::var("TELEMETRY_KEY").ok()?;
+    Some(TelemetryConfig { endpoint, key_b64 })
+}
+
 /// Main application state for the eframe app.
 /// Manages disk information, system temperatures, and UI state.
 pub struct AppState {
@@ -58,6 +77,7 @@ pub struct AppState {
     refresh_interval: Duration,
 
     telemetry_data: Arc<Mutex<TelemetrySnapshot>>,
+    telemetry_config: Option<TelemetryConfig>,
 }
 
 impl AppState {
@@ -94,6 +114,7 @@ impl AppState {
             // Automatically refresh data every 5 seconds
             refresh_interval: Duration::from_secs(5),
             telemetry_data,
+            telemetry_config: telemetry_config_from_env(),
         };
 
         // Perform initial data collection
@@ -238,6 +259,10 @@ impl AppState {
         snapshot.blocked_packets = self.blocked_packets;
         snapshot.approved_packets = self.approved_packets;
 
+        let Some(telemetry_config) = self.telemetry_config.as_ref() else {
+            return;
+        };
+
         // Debug: Print telemetry data
         println!("Telemetry synced:");
         println!("  Drives: {}", snapshot.drives.len());
@@ -247,49 +272,31 @@ impl AppState {
         println!("  Blocked packets: {:?}", snapshot.blocked_packets);
         println!("  Approved packets: {:?}", snapshot.approved_packets);
 
-        // Send telemetry data to Cloudflare Worker via POST in a background thread
+        // Send telemetry data to Cloudflare Worker via POST in a background thread.
         let snapshot_clone = (*snapshot).clone();
-        let endpoint = env::var("TELEMETRY_ENDPOINT").unwrap_or_else(|_| "https://ssd-telemetry.ssd-telemetry.workers.dev".to_string());
-        let key_b64 = env::var("TELEMETRY_KEY").ok();
+        let endpoint = telemetry_config.endpoint.clone();
+        let key_b64 = telemetry_config.key_b64.clone();
         std::thread::spawn(move || {
             let client = reqwest::blocking::Client::new();
             let payload = json!({"telemetry": snapshot_clone});
             let plaintext = serde_json::to_string(&payload).unwrap();
 
-            if let Some(k) = &key_b64 {
-                // Encrypt the payload using the existing crypto module
-                let encryptor = Encryptor::from_env();
-                let encrypted_body = encryptor.encrypt(plaintext.as_bytes());
+            let encryptor = Encryptor::from_env();
+            let encrypted_body = encryptor.encrypt(plaintext.as_bytes());
 
-                let request = client.post(&endpoint)
-                    .header("Authorization", format!("Bearer {}", k))
-                    .body(encrypted_body);
-                match request.send() {
-                    Ok(response) => {
-                        if response.status().is_success() {
-                            println!("Telemetry sent successfully");
-                        } else {
-                            eprintln!("Failed to send telemetry: HTTP {}", response.status());
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to send telemetry: {}", e);
+            let request = client.post(&endpoint)
+                .header("Authorization", format!("Bearer {}", key_b64))
+                .body(encrypted_body);
+            match request.send() {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        println!("Telemetry sent successfully");
+                    } else {
+                        eprintln!("Failed to send telemetry: HTTP {}", response.status());
                     }
                 }
-            } else {
-                // No key, send plain JSON (for testing, but Worker will fail)
-                let request = client.post(&endpoint).json(&payload);
-                match request.send() {
-                    Ok(response) => {
-                        if response.status().is_success() {
-                            println!("Telemetry sent successfully (no encryption)");
-                        } else {
-                            eprintln!("Failed to send telemetry: HTTP {}", response.status());
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to send telemetry: {}", e);
-                    }
+                Err(e) => {
+                    eprintln!("Failed to send telemetry: {}", e);
                 }
             }
         });

@@ -215,7 +215,7 @@ make clean
 make run
 
 # Run in debug mode
-sudo cargo gitrun
+sudo cargo run
 
 # Run with logging
 sudo RUST_LOG=debug cargo run
@@ -230,6 +230,8 @@ cargo test
 ## Configuration
 
 The application auto-detects drives in `/dev/` and automatically refreshes every 5 seconds. Firewall data is refreshed on the same interval. No configuration file is needed.
+
+Telemetry configuration is read from `.env` if present. Set `TELEMETRY_KEY` and `TELEMETRY_ENDPOINT` there or export them in your shell before launching the app.
 
 ## License
 
