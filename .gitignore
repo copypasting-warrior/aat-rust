@@ -38,5 +38,13 @@ Cargo.lock
 # System config or secret files
 Cargo.lock
 
+
+# Python
+ai_service/__pycache__/
+ai_service/.pytest_cache/
+__pycache__/
+.pytest_cache/
+
 env
+.env
 

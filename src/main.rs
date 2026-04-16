@@ -1,7 +1,10 @@
+mod ai_client;
 mod crypto;
+
 mod gui;
 mod firewall;
 mod models;
+
 
 use std::env;
 use std::fs;
@@ -39,6 +42,7 @@ fn load_env_file() {
         env::set_var(key, value);
     }
 }
+
 
 /// Initializes the eframe window with fixed dimensions and launches the GUI.
 fn main() -> eframe::Result<()> {
