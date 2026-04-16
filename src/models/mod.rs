@@ -108,8 +108,8 @@ pub struct TelemetrySnapshot {
     pub cpu_temp: Option<f32>,
     pub gpu_temp: Option<f32>,
     pub incoming_packets: Option<u64>,
-    pub unsafe_packets: Option<u64>,
-    pub packets_allowed: Option<u64>,
+    pub blocked_packets: Option<u64>,
+    pub approved_packets: Option<u64>,
 }
 
 impl DiskInfo {

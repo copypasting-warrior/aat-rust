@@ -75,8 +75,8 @@ impl AppState {
             cpu_temp: None,
             gpu_temp: None,
             incoming_packets: None,
-            unsafe_packets: None,
-            packets_allowed: None,
+            blocked_packets: None,
+            approved_packets: None,
         }));
 
         let mut s = Self {
@@ -235,8 +235,8 @@ impl AppState {
         snapshot.cpu_temp = self.cpu_temp;
         snapshot.gpu_temp = self.gpu_temp;
         snapshot.incoming_packets = self.incoming_packets;
-        snapshot.unsafe_packets = self.unsafe_packets;
-        snapshot.packets_allowed = self.packets_allowed;
+        snapshot.blocked_packets = self.blocked_packets;
+        snapshot.approved_packets = self.approved_packets;
 
         // Debug: Print telemetry data
         println!("Telemetry synced:");
@@ -244,8 +244,8 @@ impl AppState {
         println!("  CPU Temp: {:?}", snapshot.cpu_temp);
         println!("  GPU Temp: {:?}", snapshot.gpu_temp);
         println!("  Incoming packets: {:?}", snapshot.incoming_packets);
-        println!("  Unsafe packets: {:?}", snapshot.unsafe_packets);
-        println!("  Packets allowed: {:?}", snapshot.packets_allowed);
+        println!("  Blocked packets: {:?}", snapshot.blocked_packets);
+        println!("  Approved packets: {:?}", snapshot.approved_packets);
 
         // Send telemetry data to Cloudflare Worker via POST in a background thread
         let snapshot_clone = (*snapshot).clone();
@@ -915,12 +915,12 @@ impl eframe::App for AppState {
                                             ui.label(egui::RichText::new(snapshot.incoming_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
                                             ui.end_row();
 
-                                            ui.label(egui::RichText::new("Unsafe Packets").strong().size(11.0));
-                                            ui.label(egui::RichText::new(snapshot.unsafe_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.label(egui::RichText::new("Blocked Packets").strong().size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.blocked_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
                                             ui.end_row();
 
                                             ui.label(egui::RichText::new("Packets Allowed").strong().size(11.0));
-                                            ui.label(egui::RichText::new(snapshot.packets_allowed.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
+                                            ui.label(egui::RichText::new(snapshot.approved_packets.map(|v| v.to_string()).unwrap_or("--".to_string())).size(11.0));
                                             ui.end_row();
                                         });
                                 } else {
